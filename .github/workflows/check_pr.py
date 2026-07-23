@@ -21,21 +21,30 @@ check("No other git changes", len(non_readme_img) == 0, ", ".join(non_readme_img
 imgs = [f for f in changed if f.lower().endswith(img_ext)]
 check("Exactly one new image added", len(imgs) == 1, str(imgs))
 
-# 2. README diff: exactly one line added, none removed
+# 2. README diff: exactly 3 lines added (caption, blank, image embed), none removed
 readme_diff = sh("git diff origin/main...HEAD -- README.md")
-added = [l for l in readme_diff.splitlines() if l.startswith("+") and not l.startswith("+++")]
+added = [l[1:] for l in readme_diff.splitlines() if l.startswith("+") and not l.startswith("+++")]
 removed = [l for l in readme_diff.splitlines() if l.startswith("-") and not l.startswith("---")]
-check("Only one line added to README, none removed", len(added) == 1 and len(removed) == 0,
+check("Exactly 3 lines added to README (caption, blank, image), none removed",
+      len(added) == 3 and len(removed) == 0,
       f"{len(added)} added, {len(removed)} removed")
 
-# 3. valid markdown — new line should be an image embed referencing the new file
-if added and imgs:
-    line = added[0][1:].strip()
-    check("New README line is a valid image embed matching the new file",
-          bool(re.search(re.escape(imgs[0].split("/")[-1]), line)) and line.startswith("!["),
-          line)
-elif added:
-    check("New README line is a valid image embed matching the new file", False, "no image file found")
+# 3. those 3 lines follow the "caption" / blank / "![](path)" pattern, and the
+# image line matches the new file added in this PR
+if len(added) == 3 and imgs:
+    caption, blank, img_line = added
+    check("Caption line is quoted text", bool(re.match(r'^".+"$', caption.strip())), caption)
+    check("Second line is blank", blank.strip() == "", repr(blank))
+    check("Third line is a valid image embed matching the new file",
+          img_line.strip() == f"![]({imgs[0]})", img_line)
+elif not imgs:
+    check("README entry matches new image", False, "no image file found in PR")
+
+# 4. new entry was inserted right after the divider (top of the list), not elsewhere
+diff_lines = readme_diff.splitlines()
+hunk_headers = [l for l in diff_lines if l.startswith("@@")]
+check("New entry inserted at top of list (right after divider)",
+      len(hunk_headers) == 1, f"{len(hunk_headers)} separate diff hunks found — entry should be one contiguous insertion at the top")
 
 # 4. image lives in <Year>/<Month Name>/ folder, current month (1-day forgiveness)
 MONTHS = ["January","February","March","April","May","June","July",
